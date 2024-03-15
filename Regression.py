@@ -102,7 +102,6 @@ def get_counter_values_for_day(data, start_ix, pcn, pd, pm, x, day_no):
         curr_ctr = get_counter_value(data, ix)
 
     if len(vehicles_one_ctr_for_one_day) != 24:
-        print("something went to shit")
         raise Exception("not enough values for counter: " + str(ix) + ", "
                         + str(curr_ctr) + " for day: "
                         + str(get_day_from_row(data, ix)) + ". " + str(get_month_from_row(data, ix)))
