@@ -1,9 +1,12 @@
 # vamos
 from datetime import datetime as dt
 import datetime
-import resource
-
+import openpyxl
 import pandas as pd
+import xlsxwriter
+from openpyxl import Workbook
+
+import calendar
 import numpy as np
 
 data_paths = {
@@ -20,49 +23,126 @@ data_paths = {
 
 data_paths_combined = {
     "2021": {
-        "hourly": "./data/traffic_2021_combined.tab",
-        "minutely": "./data/traffic_2021_combined_minutely.tab"
+        "hourly": "./data/traffic_2021_combined.xlsx",
+        "minutely": "./data/traffic_2021_combined_minutely.xlsx"
     },
-    "2020": {"hourly": "./data/traffic_2020_combined.tab",
-             "minutely": "./data/traffic_2020_combined_minutely.tab"
-    },
+    "2020": {"hourly": "./data/traffic_2020_combined.xlsx",
+             "minutely": "./data/traffic_2020_combined_minutely.xlsx"
+             },
     "2019": {
-            "hourly": "./data/traffic_2019_combined.tab",
-            "minutely": "./data/traffic_2019_combined_minutely.tab"
+        "hourly": "./data/traffic_2019_combined.xlsx",
+        "minutely": "./data/traffic_2019_combined_minutely.xlsx"
     }
 }
 
 
 class FileWriter:
 
+    def get_no_days_in_year(self, year):
+        if calendar.isleap(year):
+            return 366
+        return 365
+
+    def save_stuff(self):
+        self.workbook.close()
+
+    def get_values_for_day(self, is_minutely):
+        if is_minutely:
+            return 288
+        return 24
+
+    def init_worksheet(self, year, is_minutely):
+
+        print("start init worksheet")
+        start_date = dt(year=year, month=1, day=1)
+
+        values_for_day = self.get_values_for_day(is_minutely)
+
+        row_start = 1
+
+        for i in range(self.get_no_days_in_year(year)):
+            current_date = start_date + datetime.timedelta(days=i)
+            self.worksheet.write(row_start, 0, current_date.strftime("%-d.%-m."))
+            row_start += values_for_day
+
+        row_start = 1
+        hour = 0
+        for i in range(self.get_no_days_in_year(year) * values_for_day):
+            self.worksheet.write(row_start, 1, f"{hour:02d}:00")
+            row_start += 1
+            hour += 1
+            if hour > 23:
+                hour = 0
+        print("init worksheet completed")
+
     def __init__(self, year, is_minutely):
-        self.file = open(get_combined_path_from_year(year, is_minutely), "w")
 
-    def write_combined_values_to_file_hourly(self, no_of_vehicles, counter_value, day, month, year):
+        self.year = year
+        self.is_minutely = is_minutely
 
-        try:
-            for row in range(0, len(no_of_vehicles)):
-                self.file.write(get_row_string(no_of_vehicles, get_counter_value_no_lanes_from_value(counter_value),
-                                               str(row), day, month, year, row))
-        except Exception as e:
-            raise e
+        self.workbook = xlsxwriter.Workbook(get_combined_path_from_year(year, is_minutely))
+        self.worksheet = self.workbook.add_worksheet()
 
-    def write_combined_values_to_file_minutely(self, no_of_vehicles, counter_value, day, month, year):
+        self.init_worksheet(year, is_minutely)
 
-        try:
-            time = dt.strptime("00:00:00", "%H:%M:%S")
-            for row in range(0, len(no_of_vehicles)):
-                self.file.write(get_row_string(no_of_vehicles, get_counter_value_no_lanes_from_value(counter_value),
-                                               time.strftime("%H:%M:%S"), day, month, year, row))
-                time += datetime.timedelta(minutes=5)
-        except Exception as e:
-            raise e
+        self.counter_cols = {}
+        self.counter_start_row = {}
+
+    def get_day(self, date):
+        return date.split(".")[0]
+
+    def get_month(self, date):
+        return date.split(".")[1]
+
+    def get_start_row(self, day, month):
+        date_string = str(day)+"." + str(month)+"." + str(self.year)
+        date_object = dt.strptime(date_string, '%d.%m.%Y')
+        return (date_object.timetuple().tm_yday-1) * self.get_values_for_day(self.is_minutely) + 1
+
+    def write_combined_values_to_file_hourly(self, values, counter_name, day, month):
+
+        counter_name = counter_name[:-1]
+
+        if counter_name not in self.counter_cols:
+            self.counter_cols[counter_name] = self.worksheet.dim_colmax + 1
+            self.worksheet.write(0, self.counter_cols[counter_name], counter_name)
+
+        counter_col = self.counter_cols[counter_name]
+
+        if counter_name not in self.counter_start_row:
+            self.counter_start_row[counter_name] = 1
+
+        start_row = self.get_start_row(day, month)
+        row = self.counter_start_row[counter_name]
+        while row < start_row:
+            self.worksheet.write(row, counter_col, -1)
+            row += 1
+        self.counter_start_row[counter_name] = start_row
+
+        # Write the values to the target columns
+        for row, value in enumerate(values, start=start_row):
+            self.worksheet.write(row, counter_col, value)
+        self.counter_start_row[counter_name] = self.counter_start_row[counter_name] + len(values)
+
+
+    # def write_combined_values_to_file_minutely(self, no_of_vehicles, counter_value, day, month, year):
+    #
+    #     try:
+    #         time = dt.strptime("00:00:00", "%H:%M:%S")
+    #         for row in range(0, len(no_of_vehicles)):
+    #             self.file.write(get_row_string(no_of_vehicles, get_counter_value_no_lanes_from_value(counter_value),
+    #                                            time.strftime("%H:%M:%S"), day, month, year, row))
+    #             time += datetime.timedelta(minutes=5)
+    #     except Exception as e:
+    #         raise e
 
     def write_combined_values_to_file(self, no_of_vehicles, counter_value, day, month, year, is_minutely):
         if is_minutely:
-            self.write_combined_values_to_file_minutely(no_of_vehicles, counter_value, day, month, year)
+            # todo
+            pass
+            # self.write_combined_values_to_file_minutely(no_of_vehicles, counter_value, day, month, year)
         else:
-            self.write_combined_values_to_file_hourly(no_of_vehicles, counter_value, day, month, year)
+            self.write_combined_values_to_file_hourly(no_of_vehicles, counter_value, day, month)
 
 
 def get_counter_value_no_lanes_from_value(counter_value):
@@ -74,9 +154,11 @@ def get_combined_path_from_year(year, is_minutely):
         if not is_minutely:
             return data_paths_combined[str(year)]["hourly"]
         else:
-            return data_paths_combined[str(year)]["minutely"]
+            # return data_paths_combined[str(year)]["minutely"]
+            pass
     else:
-        return "./data/final_test.tab"
+        # return "./data/final_test.tab"
+        pass
 
 
 def get_row_string(no_of_vehicles, counter_value, time, day, month, year, row):
@@ -88,7 +170,7 @@ def get_row_string(no_of_vehicles, counter_value, time, day, month, year, row):
 def get_vehicles_from_row(data, row):
     v = data.iloc[row, 5]
     if pd.isna(v):
-        return 0.0
+        return -1
     else:
         return data.iloc[row, 5]
 
@@ -101,7 +183,6 @@ def get_hour_from_row(data, row):
 
 
 def get_daily_vehicles_by_day_for_counter(data, counter_ix):
-
     # print("get_daily_vehicles_by_hour_for_counter -> ")
 
     vehicles = []
@@ -119,8 +200,7 @@ def get_daily_vehicles_by_day_for_counter(data, counter_ix):
             cix += 1
             number_of_values += 1
         else:
-            vehicles.append(0)
-
+            vehicles.append(-1)
         hour += 1
 
         try:
@@ -129,7 +209,7 @@ def get_daily_vehicles_by_day_for_counter(data, counter_ix):
             break
 
     while len(vehicles) < 24:
-        vehicles.append(0)
+        vehicles.append(-1)
 
     return vehicles, number_of_values
 
@@ -147,7 +227,6 @@ def time_dif_between_in_mins(t1, t2):
 
 
 def get_daily_vehicles_by_hour_for_counter(data, counter_ix):
-
     # print("get_daily_vehicles_by_hour_for_counter -> ")
     vehicles = []
     counter_value = get_counter_value(data, counter_ix)
@@ -165,7 +244,7 @@ def get_daily_vehicles_by_hour_for_counter(data, counter_ix):
 
     while counter_value == next_counter_value:
         # if counter_value == "0873-12":
-            # print("hour_from_row: " + str(get_hour_from_row(data, cix)) + ", time:  " + time.strftime("%H:%M:%S"))
+        # print("hour_from_row: " + str(get_hour_from_row(data, cix)) + ", time:  " + time.strftime("%H:%M:%S"))
 
         if previous_time is not None and time_dif_between_in_mins(get_hour_from_row(data, cix), previous_time) < 5:
             cix += 1
@@ -189,11 +268,7 @@ def get_daily_vehicles_by_hour_for_counter(data, counter_ix):
         except:
             break
 
-    if len(vehicles) > 288:
-        print("error - counter_ix:" + str(counter_ix) + ", cix: " + str(cix) + ", day: " + str(get_day_from_row(data, cix))
-              + ", month: " + str(get_month_from_row(data, cix)) + ", len(vehicles): " + str(len(vehicles)))
-        raise Exception("something went terribly wrong")
-    while len(vehicles) < 288: # = 12*24: 12 5-min intervals in one hour * 24 hours
+    while len(vehicles) < 288:  # = 12*24: 12 5-min intervals in one hour * 24 hours
         vehicles.append(0)
 
     return vehicles, number_of_values
@@ -225,17 +300,23 @@ def get_counter_lane_from_value(counter_value):
 
 
 def combine_vehicle_numbers(v1, v2):
-
     # print("combine_vehicle_numbers -> ")
 
     for i in range(0, len(v1)):
-        v1[i] += v2[i]
-
+        if v1[i] == -1:
+            v1[i] = v2[i]
+        elif v2[i] == -1:
+            pass
+        else:
+            v1[i] += v2[i]
     return v1
+
 
 def get_daily_vehicles_for_counter(data, counter_ix, is_minutely):
     if is_minutely:
-        return get_daily_vehicles_by_hour_for_counter(data, counter_ix)
+        # return get_daily_vehicles_by_hour_for_counter(data, counter_ix)
+        # todo doesnt work yet
+        pass
     else:
         return get_daily_vehicles_by_day_for_counter(data, counter_ix)
 
@@ -243,7 +324,6 @@ def get_daily_vehicles_for_counter(data, counter_ix, is_minutely):
 # combines the counters that are on the same location and direction but on
 # different lanes
 def combine_counter(data, first_counter_row_num, day, month, year, is_minutely, file_writer):
-
     # print("combine_counter -> ")
     vehicles, rows_to_skip = get_daily_vehicles_for_counter(data, first_counter_row_num, is_minutely)
 
@@ -256,7 +336,6 @@ def combine_counter(data, first_counter_row_num, day, month, year, is_minutely, 
     try:
         next_counter_value = get_counter_value(data, counter_ix_for_next_counter)
     except Exception as e:
-        print("seems like we've reached the end of the file")
         file_writer.write_combined_values_to_file(vehicles, counter_value, day, month, year, is_minutely)
         return counter_ix_for_next_counter
 
@@ -264,14 +343,14 @@ def combine_counter(data, first_counter_row_num, day, month, year, is_minutely, 
     while counter_name == get_counter_name_from_value(next_counter_value) \
             and counter_lane != get_counter_lane_from_value(next_counter_value):
 
-        vehicles_next_counter, rows_to_skip = get_daily_vehicles_for_counter(data, counter_ix_for_next_counter, is_minutely)
+        vehicles_next_counter, rows_to_skip = get_daily_vehicles_for_counter(data, counter_ix_for_next_counter,
+                                                                             is_minutely)
         vehicles = combine_vehicle_numbers(vehicles, vehicles_next_counter)
 
         counter_ix_for_next_counter += rows_to_skip
         try:
             next_counter_value = get_counter_value(data, counter_ix_for_next_counter)
         except Exception as e:
-            print("seems like we've reached the end of the file")
             file_writer.write_combined_values_to_file(vehicles, counter_value, day, month, year, is_minutely)
             return counter_ix_for_next_counter
 
@@ -298,7 +377,6 @@ def get_month_from_row(data, index):
 
 
 def iterate_and_combine_counters_for_one_day(data, day, month, year, counter_start_ix, is_minutely, file_writer):
-
     # print("iterate_and_combine_counters_for_one_day -> ")
 
     # loop through all the counters for this day
@@ -316,6 +394,7 @@ def iterate_and_combine_counters_for_one_day(data, day, month, year, counter_sta
     # return -1 if we've reached the end of the year
     return counter_ix, day, month
 
+
 # combines values of the counters that have the same location and direction,
 # count vehicles for different lanes
 def combine_lanes(data, is_minutely, year, file_writer):
@@ -323,9 +402,12 @@ def combine_lanes(data, is_minutely, year, file_writer):
     day = get_day_from_row(data, counter_start_ix)
     month = get_month_from_row(data, counter_start_ix)
     while day > -1:
-        print("currently doing this date: " + str(day) + ". " + str(month))
+        start_time = dt.now()
+        d = day
+        m = month
         counter_start_ix, day, month = \
             iterate_and_combine_counters_for_one_day(data, day, month, year, counter_start_ix, is_minutely, file_writer)
+        print("finished for date: " + str(d) + ". " + str(m) + ", time: " + str(dt.now() - start_time))
 
 
 def get_data_path(year, is_minutely):
@@ -345,8 +427,10 @@ def combine_lanes_from_year(year, is_minutely):
     else:
         data = pd.read_csv("./data/random.tab", delimiter='\t', header=None)
     combine_lanes(data, is_minutely, year, file_writer)
+    file_writer.save_stuff()
 
 
-# #######################################################################################33
+# #########################################################################################
+
 test_file = False
 combine_lanes_from_year(2021, is_minutely=False)
