@@ -75,6 +75,18 @@ class FileWriter:
                 hour = 0
         print("init worksheet completed")
 
+    # add -1s where values are missing (can happen for example, if there is no values for some counter in the last day,
+    # therefore write_combined_values does not get called and no -1s are written at the end of this counter's column)
+    def wrap_it_up(self):
+
+        for counter_name in self.counter_cols:
+            row = self.counter_start_row[counter_name]
+            counter_col = self.counter_cols[counter_name]
+
+            while row < self.get_no_days_in_year(self.year):
+                self.worksheet.write(row, counter_col, -1)
+                row += 1
+
     def __init__(self, year, is_minutely):
 
         self.year = year
@@ -409,6 +421,7 @@ def combine_lanes(data, is_minutely, year, file_writer):
             iterate_and_combine_counters_for_one_day(data, day, month, year, counter_start_ix, is_minutely, file_writer)
         print("finished for date: " + str(d) + ". " + str(m) + ", time: " + str(dt.now() - start_time))
 
+    file_writer.wrap_it_up()
 
 def get_data_path(year, is_minutely):
     if is_minutely:
