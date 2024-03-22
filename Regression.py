@@ -1,3 +1,4 @@
+import datetime
 import math
 
 import pandas as pd
@@ -5,12 +6,46 @@ from sklearn.linear_model import Lasso
 from datetime import datetime as dt
 import WorkFreeDays
 import numpy as np
+import xlsxwriter
+
 
 data_paths = {
     "2021": "./data/traffic_2021_combined.xlsx",
     "2020": "./data/traffic_2020_combined.xlsx",
     "2019": "./data/traffic_2019_combined.xlsx"
 }
+
+result_paths = {
+    "2021": "./data/traffic_2021_regression_results.xlsx",
+    "2020": "./data/traffic_2020_regression_results.xlsx",
+    "2019": "./data/traffic_2019_regression_results.xlsx"
+}
+
+
+
+class FileWriter:
+
+    def __init__(self, year):
+        self.workbook = xlsxwriter.Workbook(result_paths[str(year)])
+        self.worksheet = self.workbook.add_worksheet()
+
+    def write_pred_values_to_file(self, data, pred_values, pred_ix):
+        legit_values = get_row(data, pred_ix)
+
+        if len(legit_values) != len(pred_values):
+            raise Exception("something terrible has happened that shouldnt have")
+
+        if self.worksheet.dim_rowmax is None:
+            row = 0
+        else:
+            row = self.worksheet.dim_rowmax + 2
+
+        for i in range(len(legit_values)):
+            self.worksheet.write(row, i, legit_values[i])
+            self.worksheet.write(row + 1, i, pred_values[i])
+
+    def wrap_it_up(self):
+        self.workbook.close()
 
 
 def get_all_counter_names(data):
@@ -40,6 +75,7 @@ def get_work_day_value(pred_date):
 def get_x_train_basic(data, x_train_start_ix, wind_len):
     return data.iloc[x_train_start_ix:x_train_start_ix+wind_len, 2:].values.flatten()
 
+
 def get_x_train_basic_test(data, x_train_start_ix, wind_len):
 
     while x_train_start_ix < x_train_start_ix + wind_len:
@@ -56,14 +92,12 @@ def get_x_train_basic_test(data, x_train_start_ix, wind_len):
 
 
 def get_row(data, ix):
-    return data.iloc[ix, 2:].values.tolist()
+    return data.iloc[ix, 2:].values
 
 
-def get_feature_values_for_fixed_time_period(data, pred_date, wind_len, x_train_start_ix):
+def get_feature_values_for_fixed_time_period(data, pred_date, x_train_start_ix, wind_len):
     x_train_basic = get_x_train_basic(data, x_train_start_ix, wind_len)
-    return np.concatenate((x_train_basic,
-                                    [get_work_day_value(pred_date), pred_date.hour, pred_date.day,
-                                     pred_date.month]))
+    return add_add_features(x_train_basic, pred_date)
 
 
 def get_counter_value(data, row_ix, counter_name):
@@ -74,32 +108,39 @@ def get_start_row(date, is_minutely):
     return (date.timetuple().tm_yday - 1) * get_values_for_day(is_minutely) + date.hour
 
 
-def check_for_nan(x):
-    for i in range(len(x)):
-        if x is None or x == "nan" or x == "NaN" or x == "None":
-            print("x is none: " + str(i) + ", " + str(i/len(all_counter_names)) + ", " + str(i % len(all_counter_names)))
+def decrease_date_by(date, amount, is_minutely):
+    if is_minutely:
+        return date - datetime.timedelta(minutes=amount*5)
+    else:
+        return date - datetime.timedelta(hours=amount)
 
-def get_feature_values(data, counter_name, is_minutely, pred_date, wind_len, train_len):
+
+def increase_date_by(date, amount, is_minutely):
+    if is_minutely:
+        return date + datetime.timedelta(minutes=amount*5)
+    else:
+        return date + datetime.timedelta(hours=amount)
+
+
+def get_feature_values(data, is_minutely, pred_date, wind_len, train_len):
     pred_date_ix = get_start_row(pred_date, is_minutely)
-    y_train_start_ix = pred_date_ix - train_len
-    x_train_start_ix = y_train_start_ix - wind_len
+    x_train_start_ix = pred_date_ix - train_len - wind_len
+    train_date = decrease_date_by(pred_date, train_len, is_minutely)
 
     x_train = []
-    y_train = []
 
     tp_ix = 0
 
-    while y_train_start_ix < pred_date_ix:
+    while x_train_start_ix < pred_date_ix - wind_len:
 
-        x_train.append(get_feature_values_for_fixed_time_period(data, pred_date, wind_len, x_train_start_ix).tolist())
-        y_train.append(get_counter_value(data, y_train_start_ix, counter_name))
+        x_train.append(get_feature_values_for_fixed_time_period(data, train_date, x_train_start_ix, wind_len))
 
-        y_train_start_ix += 1
         x_train_start_ix += 1
 
+        train_date = increase_date_by(train_date, 1, is_minutely)
         tp_ix += 1
 
-    return x_train, y_train
+    return x_train
 
 
 # params:
@@ -107,14 +148,12 @@ def get_feature_values(data, counter_name, is_minutely, pred_date, wind_len, tra
 #   wind_len - number of days before prediction day that will be taken into account when predicting
 #         values from including pred_day on
 #   train_len - how big the training set will be (ie how far into the past the training will start)
-#   values before index(pred_day, pred_month) - train_len - data_len will not be taken into an account for regression
-def prepare_data(data, counter_name, is_minutely, pred_date, wind_len, train_len):
+#   values before (index(pred_day, pred_month) - train_len - data_len) will not be taken into an account for regression
+def prepare_data(data, is_minutely, pred_date, wind_len, train_len):
 
-    x_train, y_train = get_feature_values(data, counter_name, is_minutely, pred_date, wind_len, train_len)
-    x_test = get_feature_values_for_fixed_time_period(data, pred_date, wind_len, get_start_row(pred_date, is_minutely)
-                                                      - wind_len).reshape(1, -1).tolist()
+    x_train = get_feature_values(data, is_minutely, pred_date, wind_len, train_len)
 
-    return x_train, y_train, x_test
+    return x_train
 
 
 def get_data_path(year, is_minutely):
@@ -122,31 +161,101 @@ def get_data_path(year, is_minutely):
         return data_paths[str(year)]
 
 
-def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day, pred_month, year, wind_len, train_len):
+def cosine(value):
+
+    return math.cos((value-12)*(math.pi/12))+1
+
+
+def add_add_features(sample, pred_date):
+    return np.concatenate((sample, [get_work_day_value(pred_date), cosine(pred_date.hour), pred_date.day,
+                                     pred_date.month]))
+
+
+def get_y_train(data, counter_name, prediction_ix, train_len):
+    return data.loc[prediction_ix-train_len:prediction_ix-1, counter_name].values
+
+
+def modify_x_train(x_train, pred_values, new_date):
+    # remove first sample
+    x_train = x_train[1:]
+
+    new_sample = x_train[-1]
+    sample_size = len(x_train[0])
+    no_of_additional_features = sample_size % len(all_counter_names)
+
+    # remove first day of the sample
+    new_sample = new_sample[len(pred_values):]
+
+    # remove additional features
+    new_sample = new_sample[:-no_of_additional_features]
+
+    # add new values
+    new_sample = np.concatenate((new_sample, pred_values))
+
+    # add additional features
+    new_sample = add_add_features(new_sample, new_date)
+
+    x_train.append(new_sample)
+    return x_train
+
+
+def modify_x_test(x_test, pred_values, pred_date):
+    sample_size = len(x_test[0])
+    no_of_additional_features = sample_size % len(all_counter_names)
+    new_x_test = x_test[0][len(pred_values):]
+    new_x_test = new_x_test[:-no_of_additional_features]
+    new_x_test = np.concatenate((new_x_test, pred_values))
+    new_x_test = add_add_features(new_x_test, pred_date)
+    return new_x_test.reshape(1, -1)
+
+
+def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
+                     pred_month, year, wind_len, train_len, pred_len):
 
     pred_date = get_date(pred_minute, pred_hour, pred_day, pred_month, year)
-    cix = 0
-    for counter_name in all_counter_names:
-        start_time = dt.now()
-        print("initializing learning data ...")
-        x_train, y_train, x_test = prepare_data(data,
-                                                counter_name,
-                                                is_minutely,
-                                                pred_date,
-                                                wind_len, train_len)
-        lasso = Lasso(alpha=0.3)
-        print("learning ...")
-        lasso.fit(x_train, y_train)
-        print("predicting ...")
-        y_pred = lasso.predict(x_test)
 
-        y_legit = get_counter_value(data, get_start_row(pred_date, is_minutely), counter_name)
+    print("initializing training data ...")
+    prediction_ix = get_start_row(pred_date, is_minutely)
 
-        print(str(y_pred) + ", " + str(y_legit) + " || dif: " + str(y_pred - y_legit))
-        print("time period: " + str(cix) + "/" + str(train_len) + ", time: " + str(dt.now() - start_time))
-        print("----------------------------------------------------------------")
+    x_train = get_feature_values(data,
+                 is_minutely,
+                 pred_date,
+                 wind_len, train_len)
+    x_test = get_feature_values_for_fixed_time_period(data, pred_date, prediction_ix - wind_len, wind_len).reshape(1,-1)
 
-        cix += 1
+    file_writer = FileWriter(year)
+
+
+    for i in range(pred_len):
+
+        curr_predicted_values = []
+
+        for counter_name in all_counter_names:
+
+            start_time = dt.now()
+
+            y_train = get_y_train(data, counter_name, prediction_ix, train_len)
+
+            lasso = Lasso(alpha=0.2)
+            lasso.fit(x_train, y_train)
+
+            y_pred = lasso.predict(x_test)
+            y_legit = get_counter_value(data, get_start_row(pred_date, is_minutely), counter_name)
+
+            curr_predicted_values.append(y_pred[0])
+
+            print(str(y_pred) + ", " + str(y_legit) + " || dif: " + str(y_pred - y_legit))
+            print("counters done: " + str(len(curr_predicted_values)) + "/" + str(len(all_counter_names)) +
+                  ", time: " + str(dt.now() - start_time))
+            print("----------------------------------------------------------------")
+
+        file_writer.write_pred_values_to_file(data, curr_predicted_values, prediction_ix)
+        x_train = modify_x_train(x_train, curr_predicted_values, pred_date)
+        pred_date = increase_date_by(pred_date, 1, is_minutely)
+        x_test = modify_x_test(x_test, curr_predicted_values, pred_date)
+        prediction_ix += 1
+
+    file_writer.wrap_it_up()
 
 
 #########################################################################################################
@@ -157,9 +266,10 @@ month = 3
 day = 25
 hour = 16
 minute = 0
-wind_len = 120
-train_len = 24*50
+wind_len = 15
+train_len = 60
 is_minutely = False
+pred_len = 10
 
 
 if get_start_row(get_date(minute, hour, day, month, year), is_minutely) < train_len:
@@ -173,4 +283,4 @@ print("data read finish")
 all_counter_names = get_all_counter_names(data)
 print(len(all_counter_names))
 a = all_counter_names
-lasso_regression(data, is_minutely, minute, hour, day, month, year, wind_len, train_len)
+lasso_regression(data, is_minutely, minute, hour, day, month, year, wind_len, train_len, pred_len)

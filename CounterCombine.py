@@ -1,10 +1,11 @@
 # vamos
+import json
+import sys
 from datetime import datetime as dt
 import datetime
 import openpyxl
 import pandas as pd
 import xlsxwriter
-from openpyxl import Workbook
 
 import calendar
 import numpy as np
@@ -38,41 +39,33 @@ data_paths_combined = {
 
 class FileWriter:
 
-    def get_no_days_in_year(self, year):
-        if calendar.isleap(year):
-            return 366
-        return 365
-
     def save_stuff(self):
         self.workbook.close()
-
-    def get_values_for_day(self, is_minutely):
-        if is_minutely:
-            return 288
-        return 24
 
     def init_worksheet(self, year, is_minutely):
 
         print("start init worksheet")
         start_date = dt(year=year, month=1, day=1)
 
-        values_for_day = self.get_values_for_day(is_minutely)
+        values_for_day = get_values_for_day(is_minutely)
 
         row_start = 1
 
-        for i in range(self.get_no_days_in_year(year)):
+        for i in range(get_no_days_in_year(year)):
             current_date = start_date + datetime.timedelta(days=i)
             self.worksheet.write(row_start, 0, current_date.strftime("%-d.%-m."))
             row_start += values_for_day
 
         row_start = 1
         hour = 0
-        for i in range(self.get_no_days_in_year(year) * values_for_day):
+        time = dt(day=0, month=0, year=0, hour=0, minute=0)
+        for i in range(get_no_days_in_year(year) * values_for_day):
+            # todo: change for minutely
             self.worksheet.write(row_start, 1, f"{hour:02d}:00")
             row_start += 1
-            hour += 1
-            if hour > 23:
-                hour = 0
+            time = increase_date_by(time, 1,  is_minutely)
+            if time.hour > 23:
+                time = dt(day=0, month=0, year=0, hour=0, minute=0)
         print("init worksheet completed")
 
     # add -1s where values are missing (can happen for example, if there is no values for some counter in the last day,
@@ -83,9 +76,26 @@ class FileWriter:
             row = self.counter_start_row[counter_name]
             counter_col = self.counter_cols[counter_name]
 
-            while row < self.get_no_days_in_year(self.year):
+            while row < get_no_days_in_year(self.year):
                 self.worksheet.write(row, counter_col, -1)
                 row += 1
+
+    def replace_null_values(self, year, is_minutely):
+        data = pd.read_csv(get_combined_path_from_year(year, is_minutely), delimiter='\t', header=None)
+
+        for counter_name in self.counter_cols:
+
+            was_prev_value_null = True
+
+            for row in range(1, get_no_days_in_year(self.year)*get_values_for_day(is_minutely)+1):
+                value = data.iloc[row, self.counter_cols[counter_name]]
+
+                if value == -1:
+                    handle_null_value(data, row, self.counter_cols[counter_name], counter_name, was_prev_value_null,
+                                      self.is_minutely)
+                    was_prev_value_null = True
+                else:
+                    was_prev_value_null = False
 
     def __init__(self, year, is_minutely):
 
@@ -109,7 +119,7 @@ class FileWriter:
     def get_start_row(self, day, month):
         date_string = str(day)+"." + str(month)+"." + str(self.year)
         date_object = dt.strptime(date_string, '%d.%m.%Y')
-        return (date_object.timetuple().tm_yday-1) * self.get_values_for_day(self.is_minutely) + 1
+        return (date_object.timetuple().tm_yday-1) * get_values_for_day(self.is_minutely) + 1
 
     def write_combined_values_to_file_hourly(self, values, counter_name, day, month):
 
@@ -155,6 +165,96 @@ class FileWriter:
             # self.write_combined_values_to_file_minutely(no_of_vehicles, counter_value, day, month, year)
         else:
             self.write_combined_values_to_file_hourly(no_of_vehicles, counter_value, day, month)
+
+
+def increase_date_by(date, amount, is_minutely):
+    if is_minutely:
+        return date + datetime.timedelta(minutes=amount*5)
+    else:
+        return date + datetime.timedelta(hours=amount)
+
+def get_values_in_a_week(is_minutely):
+    if is_minutely:
+        return 24*12*7
+    else:
+        return 24*7
+
+def get_values_from_prev_weeks(data, row, col, is_minutely):
+    values_in_a_week = get_values_in_a_week(is_minutely)
+    r = row
+    while r > 0:
+        r -= values_in_a_week
+        value = data.iloc[r, col]
+        if value != -1:
+            return value
+
+
+def find_coords_of_counter(coords, counter_name):
+    for ctr_name, ctr_data in coords.items():
+        if ctr_name[:-1] == counter_name:
+            return ctr_data['latitude'], ctr_data['longitude']
+    raise Exception("could not find coords of counter: " + counter_name)
+
+
+def get_dist(ctr_data, lat, lon):
+    lat_ctr = ctr_data['latitude']
+    lon_ctr = ctr_data['longitude']
+    return abs(lat_ctr-lat) + abs(lon_ctr-lon)
+
+
+def get_value_from_counter(coords, row, counter_name):
+    return coords.loc[:, counter_name].values.tolist()[row]
+
+
+
+def get_value_from_closest_counter(coords, row, counter_name):
+
+    lat, lon = find_coords_of_counter(coords, counter_name)
+
+    min_dist = sys.maxsize
+    return_ctr_value = None
+
+    for ctr_name, ctr_data in coords.items():
+        dist = get_dist(ctr_data, lat, lon)
+        value = get_value_from_counter(coords, row, ctr_name[:-1])
+        if ctr_name[:-1] != counter_name and min_dist > dist and value != -1: #############################################
+            min_dist = dist
+            return_ctr_value = value
+
+    if return_ctr_value is not None:
+        return return_ctr_value
+    else:
+        raise Exception("could not find closest counter with non null value")
+
+
+def is_next_value_null(data, r, c):
+    if data.iloc[r+1, c] == -1:
+        return True
+    return False
+
+def handle_null_value(data, row, col, counter_name, was_prev_value_null, is_minutely):
+
+    coords = json.load(open('data.json', 'r'))
+
+    if not was_prev_value_null and not is_next_value_null(data, row, col):
+        data.at[row, col] = data.iloc[row-1, col]
+    else:
+        value_from_prev_weeks = get_values_from_prev_weeks(data, row, col, is_minutely) #############################################
+        if value_from_prev_weeks is not None:
+            data.at[row, col] = value_from_prev_weeks
+        else:
+            data.at[row, col] = get_value_from_closest_counter(coords, row, counter_name)
+
+def get_values_for_day(is_minutely):
+    if is_minutely:
+        return 288
+    return 24
+
+
+def get_no_days_in_year(year):
+    if calendar.isleap(year):
+        return 366
+    return 365
 
 
 def get_counter_value_no_lanes_from_value(counter_value):
@@ -441,6 +541,7 @@ def combine_lanes_from_year(year, is_minutely):
         data = pd.read_csv("./data/random.tab", delimiter='\t', header=None)
     combine_lanes(data, is_minutely, year, file_writer)
     file_writer.save_stuff()
+    file_writer.replace_null_values(year, is_minutely)
 
 
 # #########################################################################################
