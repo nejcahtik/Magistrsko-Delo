@@ -1,5 +1,6 @@
 import datetime
 import math
+import random
 
 import pandas as pd
 from sklearn.linear_model import Lasso
@@ -50,6 +51,13 @@ class FileWriter:
 
 def get_all_counter_names(data):
     return data.columns.tolist()[2:]
+
+
+def get_random_counter_names(percentage):
+    all_counters = data.columns.tolist()[2:]
+    new_list_size = len(all_counters) // percentage
+
+    return random.sample(all_counters, new_list_size)
 
 
 def get_values_for_day( is_minutely):
@@ -225,7 +233,6 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
 
     file_writer = FileWriter(year)
 
-
     for i in range(pred_len):
 
         curr_predicted_values = []
@@ -234,7 +241,8 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
 
             start_time = dt.now()
 
-            y_train = get_y_train(data, counter_name, prediction_ix, train_len)
+            y_train = get_y_train(data, counter_name, prediction_ix, train_len) #todo
+            x_train = get_feature_values(data, is_minutely, pred_date, wind_len, train_len)
 
             lasso = Lasso(alpha=0.2)
             lasso.fit(x_train, y_train)
@@ -242,7 +250,6 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
             y_pred = lasso.predict(x_test)
             y_legit = get_counter_value(data, get_start_row(pred_date, is_minutely), counter_name)
 
-            curr_predicted_values.append(y_pred[0])
 
             print(str(y_pred) + ", " + str(y_legit) + " || dif: " + str(y_pred - y_legit))
             print("counters done: " + str(len(curr_predicted_values)) + "/" + str(len(all_counter_names)) +
@@ -250,8 +257,9 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
             print("----------------------------------------------------------------")
 
         file_writer.write_pred_values_to_file(data, curr_predicted_values, prediction_ix)
-        x_train = modify_x_train(x_train, curr_predicted_values, pred_date)
+
         pred_date = increase_date_by(pred_date, 1, is_minutely)
+        x_train = modify_x_train(x_train, pred_date)
         x_test = modify_x_test(x_test, curr_predicted_values, pred_date)
         prediction_ix += 1
 
@@ -266,11 +274,12 @@ month = 3
 day = 25
 hour = 16
 minute = 0
-wind_len = 15
-train_len = 60
+wind_len = 10
+train_len = 20
 is_minutely = False
 pred_len = 10
 
+counter_downsize = 10
 
 if get_start_row(get_date(minute, hour, day, month, year), is_minutely) < train_len:
     raise Exception("train length is longer than available data - ie you want to train the model on the data"
@@ -280,7 +289,5 @@ file_path = get_data_path(year, is_minutely)
 print("data read start")
 data = pd.read_excel(file_path, header=0)
 print("data read finish")
-all_counter_names = get_all_counter_names(data)
-print(len(all_counter_names))
-a = all_counter_names
+all_counter_names = get_random_counter_names(counter_downsize)
 lasso_regression(data, is_minutely, minute, hour, day, month, year, wind_len, train_len, pred_len)
