@@ -162,7 +162,9 @@ def sine(value_degrees):
 
 
 def add_add_features(sample, pred_date):
-    return np.concatenate((sample, [cosine((360/24)*pred_date.hour), sine((360/24)*pred_date.hour),
+    # return sample
+    return np.concatenate((sample, [cosine((360/60)*pred_date.minute), sine((360/60)*pred_date.minute),
+                                    cosine((360/24)*pred_date.hour), sine((360/24)*pred_date.hour),
                                     cosine((360/7)*pred_date.weekday()), sine((360/7)*pred_date.weekday()),
                                      cosine((360/31)*pred_date.day), sine((360/31)*pred_date.day),
                                     cosine((360/12)*pred_date.month), sine((360/12)*pred_date.month),
@@ -212,7 +214,8 @@ def modify_x_test(data, x_test, prediction_ix, pred_date):
     sample_size = len(x_test[0])
     no_of_additional_features = sample_size % len(counter_names)
     new_x_test = x_test[0][len(counter_names):]
-    new_x_test = new_x_test[:-no_of_additional_features]
+    if no_of_additional_features != 0:
+        new_x_test = new_x_test[:-no_of_additional_features]
     new_data = get_row(data, prediction_ix-1)
     new_x_test = np.concatenate((new_x_test, new_data))
     new_x_test = add_add_features(new_x_test, pred_date)
@@ -228,7 +231,7 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
     prediction_ix = get_start_row(pred_date, is_minutely)
 
     # random column
-    counter_name = data.columns[40]
+    counter_name = data.columns[9]
 
     x_train = get_feature_values(data,
                  is_minutely,
@@ -248,29 +251,22 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
 
     for i in range(pred_len):
 
-        # curr_predicted_values = []
-        # for counter_name in counter_names:
         start_time = dt.now()
 
-        model = MultiOutputRegressor(LinearRegression())
+        if len(x_train) != 240 and len(x_train[i]) != 24864 and len(y_train) != 240 and len(y_train[i]) != 120:
+            raise Exception("x and y are not appropriate size")
+
+        model = MultiOutputRegressor(LinearRegression(), n_jobs=-1)
         model.fit(x_train, y_train)
 
-        y_pred = model.predict(x_test)
+        y_pred = model.predict(x_test)[0]
         y_legit = get_counter_from(data, counter_name, prediction_ix, wind_pred)
-        # print(str(y_pred) + ", " + str(y_legit) + " || dif: " + str(y_pred - y_legit))
 
-        # print(y_pred)
-        # print(y_legit)
-        # mse = mean_squared_error(y_legit, y_pred[0])
-        difs = y_pred[0] - y_legit
+
+        difs = y_pred - y_legit
         differences.append(difs)
         y_legits.append(y_legit)
-        y_preds.append(y_pred[0])
-
-        # print("Mean Squared Error:", mse)
-        print("----------------------------------------------------------------")
-
-        # file_writer.write_pred_values_to_file(data, curr_predicted_values, prediction_ix)
+        y_preds.append(y_pred)
 
         pred_date = increase_date_by(pred_date, 1, is_minutely)
         prediction_ix += 1
@@ -280,10 +276,8 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
         y_train = get_y_train(data, counter_name, prediction_ix, train_len, wind_pred)
 
         print("progress: " + str(i+1) + "/" + str(pred_len) + ", time: " + str(dt.now() - start_time))
+        print("----------------------------------------------------------------")
 
-    print("-----------------------------------------")
-    print(differences)
-    print("-----------------------------------------")
     np.savetxt("./data/prediction_errs_"+counter_name+".txt", np.array(differences), fmt='%.2f')
     np.savetxt("./data/prediction_errs_y_legit"+counter_name+".txt", np.array(y_legits), fmt='%.2f')
     np.savetxt("./data/prediction_errs_y_pred"+counter_name+".txt", np.array(y_preds), fmt='%.2f')
@@ -293,7 +287,7 @@ def lasso_regression(data, is_minutely, pred_minute, pred_hour, pred_day,
 
 def remove_columns_and_get_file_path(percentage, year, is_minutely):
 
-    number_of_all_indexes = 1260  # todo: check if this number is correct
+    number_of_all_counters = 1260  # todo: check if this number is correct
 
     if percentage == 0:
         return get_data_path(year, is_minutely)
@@ -307,7 +301,7 @@ def remove_columns_and_get_file_path(percentage, year, is_minutely):
 
     data = pd.read_excel(get_data_path(year, is_minutely), header=0)
 
-    list_size = round(((100-percentage)/100)*number_of_all_indexes)
+    list_size = round(((100-percentage)/100)*number_of_all_counters)
 
     indeces_to_drop = sorted(random.sample(range(2, 1260), list_size))
 
@@ -330,13 +324,13 @@ day = 30
 hour = 0
 minute = 0
 
-wind_len = 24*3
-train_len = 24*15
+wind_len = 24*7
+train_len = 24*10
 is_minutely = False
-wind_pred = 24*2
-pred_len = 24*6
+wind_pred = 24*5
+pred_len = 24*7
 
-counter_percentage = 5
+counter_percentage = 10
 
 
 if get_start_row(get_date(minute, hour, day, month, year), is_minutely) < train_len:

@@ -4,11 +4,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def cosine(value):
-
-    return math.cos((value-12)*(math.pi/12))+1
-
-
 def draw_graph():
     points = [(1, 16.68975404), (2, 130.1635603), (3, 104.616433), (4, 124.0240618),
             (5, 82.2882722), (6, 311.1311038), (7, 677.4720455), (8, 3653.228496),
@@ -30,11 +25,8 @@ def draw_graph():
     plt.show()
 
 def draw_graph_of_errors():
-    file_path1 = "./data/prediction_errs_0056-2.txt"
-    file_path2 = "./data/prediction_errs_0561-2.txt"
-    legit_y_path = "./data/prediction_errs_y_legit0561-2.txt"
 
-    loaded_array1 = np.loadtxt(file_path2)
+    loaded_array1 = np.loadtxt(pred_errs_path)
     t_loaded_array1 = loaded_array1.T
 
     legit_y_data = np.loadtxt(legit_y_path)
@@ -46,24 +38,25 @@ def draw_graph_of_errors():
 
     for i in range(len(t_loaded_array1)):
         if i % 8 == 0:
-            ax.plot(np.arange(len(t_loaded_array1[i])) + i, t_loaded_array1[i], label="Prediction Time" + str(i+1))
+            ax.plot(np.arange(len(t_loaded_array1[i])) + i, np.abs(t_loaded_array1[i]), label="Prediction Time " + str(i+1))
 
-    ax2 = ax.twinx()
-    ax2.plot(legit_y_data, 'r-', label="Actual Values")
-    ax2.set_ylabel('Actual Values')
-    # ax.plot(legit_y_data)
+    # ax2 = ax.twinx()
+    # ax2.plot(legit_y_data, 'r-', label="Actual Values")
+    # ax2.set_ylabel('Actual Values')
+    # ax2.legend(loc='upper right')
+    # ax.set_ylim(0, 200)
+
+
 
     # plt.plot(t_loaded_array1[20])
 
     # plt.legend([f'Prediction Time {8*i+1}' for i in range(len(t_loaded_array1))])
     ax.legend(loc='upper left')
-    ax.set_ylim(0, 400)
-    ax2.legend(loc='upper right')
     plt.title("Prediction Errors")
+    plt.grid(True)
     plt.show()
 
 def draw_actual_values():
-    legit_y_path = "./data/prediction_errs_y_legit0561-2.txt"
     legit_y_data = np.loadtxt(legit_y_path)
 
     plt.plot(legit_y_data)
@@ -72,30 +65,28 @@ def draw_actual_values():
     plt.show()
 
 
-def draw_graph_of_actual_vs_legit():
-    legit_path = "./data/prediction_errs_y_legit0561-2.txt"
-    pred_path = "./data/prediction_errs_y_pred0561-2.txt"
+def draw_graph_of_actual_vs_predicted():
 
-    y_pred_t = np.loadtxt(pred_path)
+    y_pred_t = np.loadtxt(pred_y_path)
     y_pred = y_pred_t.T
-    y_legit = np.loadtxt(legit_path)
+    y_legit = np.loadtxt(legit_y_path)
 
-    pred_len = 24*5
+    pred_len = 24*7
 
     for i in range(len(y_pred)):
         if i % 10 == 0:
-            plt.scatter( y_pred[i], y_legit[i:pred_len+i])
+            plt.scatter(y_pred[i], y_legit[i:pred_len+i], label="Prediction Time " + str(i+1))
 
     plt.xlabel('Predicted Values')
     plt.ylabel('Actual Values')
     plt.title('Actual vs Predicted Values')
+    plt.legend()
     plt.grid(True)
     plt.show()
 
 
 def draw_avg_values_of_preds():
-    pred_path = "./data/prediction_errs_0561-2.txt"
-    y_pred_t = np.loadtxt(pred_path)
+    y_pred_t = np.loadtxt(pred_errs_path)
     y_pred = y_pred_t.T
 
     avg_values = []
@@ -103,7 +94,7 @@ def draw_avg_values_of_preds():
     for i in range(len(y_pred)):
         avg = 0
         for j in range(len(y_pred[i])):
-            avg += y_pred[i][j]
+            avg += np.abs(y_pred[i][j])
 
         avg = avg/len(y_pred[i])
         avg_values.append(avg)
@@ -116,18 +107,18 @@ def draw_avg_values_of_preds():
     plt.show()
 
 def draw_errors_vs_predicted_value():
-    pred_errs_path = "./data/prediction_errs_0561-2.txt"
+
     y_pred_errs_t = np.loadtxt(pred_errs_path)
     y_pred_errs = y_pred_errs_t.T
 
-    pred_path = "./data/prediction_errs_y_pred0561-2.txt"
-    y_pred_t = np.loadtxt(pred_path)
+    y_pred_t = np.loadtxt(pred_y_path)
     y_pred = y_pred_t.T
 
-    for i in range(len(y_pred)):
-        if i % 10 == 0:
-            plt.scatter(y_pred[i], y_pred_errs[i], label="Prediction Time: " + str(i+1))
+    # for i in range(len(y_pred)):
+    #     if i % 5 == 0:
+    #         plt.scatter(y_pred[i], y_pred_errs[i], label="Prediction Time: " + str(i+1))
 
+    plt.scatter(y_pred[0], y_pred_errs[0], label="Prediction Time: " + str(1))
 
     plt.legend()
     plt.xlabel("Predicted Values")
@@ -136,6 +127,52 @@ def draw_errors_vs_predicted_value():
     plt.grid(True)
     plt.show()
 
+def draw_with_vs_without_add_features():
+    y_pred_t = np.loadtxt(pred_errs_path)
+    y_pred = y_pred_t.T
+
+    y_pred_t_w = np.loadtxt("./data/prediction_errs_"+counter_name+".txt")
+    y_pred_w = y_pred_t_w.T
+
+    avg_values = []
+    avg_values_w = []
+    dif = []
+
+    fig, ax = plt.subplots()
+
+    ax.set_xlabel('Time (hours)')
+    ax.set_ylabel('Error')
+
+    for i in range(len(y_pred)):
+        avg = 0
+        avg_w = 0
+
+        if len(y_pred[i]) != len(y_pred_w[i]):
+            raise Exception("arrays should be of same length")
+
+        for j in range(len(y_pred[i])):
+            avg += np.abs(y_pred[i][j])
+            avg_w += np.abs(y_pred_w[i][j])
+
+        dif.append(avg-avg_w)
+        avg_values.append(avg/len(y_pred[i]))
+        avg_values_w.append(avg_w/len(y_pred[i]))
+
+    # ax.plot(np.arange(120), dif, label="With additional features")
+    # ax.plot(np.arange(120), avg_values_w, label="Without additional features")
+
+    ax.plot(np.arange(120), dif, label="Differences")
+
+    plt.xlabel('Prediction Reach')
+    plt.ylabel('Error')
+    plt.title("Average Errors")
+    plt.grid(True)
+    plt.show()
 
 
-draw_errors_vs_predicted_value()
+counter_name = "0055-1"
+pred_errs_path = "./data/"+counter_name+"/prediction_errs_"+counter_name+".txt"
+legit_y_path = "./data/"+counter_name+"/prediction_errs_y_legit"+counter_name+".txt"
+pred_y_path = "./data/"+counter_name+"/prediction_errs_y_pred"+counter_name+".txt"
+
+draw_avg_values_of_preds()
