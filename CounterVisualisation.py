@@ -11,7 +11,7 @@ def get_coordinates():
     counter_coordinates = []
 
     for element_key, element_value in data.items():
-        counter_coordinates.append([element_value["latitude"], element_value["longitude"]])
+        counter_coordinates.append((element_key, element_value["latitude"], element_value["longitude"]))
 
     return counter_coordinates
 
@@ -25,7 +25,7 @@ def draw_counters():
     point_coords = get_coordinates()
 
     for coords in point_coords:
-        folium.Marker(coords, tooltip=f"Coordinates: {coords}").add_to(map_slovenia)
+        folium.Marker([coords[1], coords[2]], tooltip=coords[0]).add_to(map_slovenia)
 
     return map_slovenia
 
@@ -63,6 +63,6 @@ def draw_paths_of_counter(ctr_name, map):
 
 
 map_slovenia = draw_counters()
-map_slovenia = draw_paths_of_counter("0855-1", map_slovenia)
+# map_slovenia = draw_paths_of_counter("0855-1", map_slovenia)
 
-map_slovenia.save("./counters.html")
+map_slovenia.save("./data/visualisations/counters.html")
